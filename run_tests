@@ -18,4 +18,6 @@ if [ "$#" -ne 1 ]; then
     exit 1
 fi
 
+export LD_LIBRARY_PATH=$PWD/libwb/build/:$LD_LIBRARY_PATH
+
 time ./md5 $1
