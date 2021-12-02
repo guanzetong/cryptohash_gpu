@@ -1,5 +1,0 @@
-/var/spool/slurmd.spool/job29292954/slurm_script: line 23: 201271 Segmentation fault      (core dumped) ./md5 $1
-
-real	0m1.265s
-user	0m0.116s
-sys	0m0.183s
