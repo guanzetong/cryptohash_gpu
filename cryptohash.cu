@@ -1,32 +1,68 @@
 // Cryptohash
 
 #include <wb.h>
-#include <stdio.h>
+#include "support.h"
+#include "cracker_kernel.cu"
 
-#define NUM_CHAR 62
-#define MAX_LEN 5
+#define BLOCK_SIZE 128
+#define DICT_PWD_NUM_PER_THREAD 10
+#define BRUTE_FORCE_MAX_LEN 5
+#define MAX_GRID_SIZE 65536
 
 // CPU var
 char *test;
 uint8_t int_test[16];
 
-// GPU constant memory
-__constant__ uint32_t device_k[64];
-__constant__ uint32_t device_r[64];
-__constant__ uint32_t device_h_init[4];
-__constant__ char device_charset[62];
+// Read dictionary
+void readPwdFromFile(FILE *infile, password **pwd, unsigned int *numLines){
 
-// GPU functions
+    unsigned int numberOfLines = 0;
+    int ch;
+    while (EOF != (ch=getc(infile))){
+        if (ch=='\n'){
+            ++numberOfLines;
+            if(numberOfLines == (UINT_MAX/sizeof(char*)))
+                break;
+        }
+    }
+    rewind(infile);
 
-// leftrotate function definition
-#define LEFTROTATE(x, c) (((x) << (c)) | ((x) >> (32 - (c))))
+    *pwd = (password*)malloc(numberOfLines*sizeof(password));
+    if(*pwd == NULL){
+        printf("\nERROR: Memory allocation did not complete successfully! Exiting.");
+        exit(0);
+    }
 
-inline void to_bytes(uint32_t val, uint8_t *bytes)
-{
-    bytes[0] = (uint8_t) val;
-    bytes[1] = (uint8_t) (val >> 8);
-    bytes[2] = (uint8_t) (val >> 16);
-    bytes[3] = (uint8_t) (val >> 24);
+    char *line = NULL;
+    size_t len = 0;
+    int read_len = 0;
+    unsigned int i=0;
+    unsigned int toReduce = 0;
+    while (i<numberOfLines) {
+        read_len = getline(&line, &len, infile);
+        if(read_len != -1){
+            if(line[read_len-1] == '\n')    read_len = read_len - 1;
+            if(line[read_len-1] == '\r')    read_len = read_len - 1;
+
+            if(read_len > 45){
+                //printf("Skipping (too big) - %s\n",line);
+                ++toReduce;
+            } else {
+                // (*pwd)[i-toReduce] = (char*)malloc( (read_len+1)*sizeof(char));
+                memcpy((*pwd)[i-toReduce].word,line,read_len);
+                (*pwd)[i-toReduce].length = read_len;
+                //printf("Pwd Read: %s, %d\n", (*pwd)[i], read_len);
+              }
+          } else {
+            ++toReduce;
+          }
+        free(line);
+        line = NULL;
+        len = 0;
+          i++;
+    }
+    *numLines = numberOfLines-toReduce;
+    //passwd = &pwd;
 }
 
 // HASH to uint8
@@ -46,169 +82,6 @@ void hash_to_int(char *charHash, uint8_t intHash[]){
     }
 }
 
-// Convert 4 bytes(uint8_t) to 1 word(uint32_t)
-__device__ uint32_t bytes_to_word(uint8_t *bytes)
-{
-    uint32_t word =  (uint32_t) bytes[0]
-                  | ((uint32_t) bytes[1] << 8)
-                  | ((uint32_t) bytes[2] << 16)
-                  | ((uint32_t) bytes[3] << 24);
-    return word;
-}
-
-// Convert 1 word(uint32_t) to 4 bytes(uint8_t)
-__device__ void word_to_bytes(uint32_t word, uint8_t *bytes)
-{
-    bytes[0] = (uint8_t) word;
-    bytes[1] = (uint8_t) (word >> 8);
-    bytes[2] = (uint8_t) (word >> 16);
-    bytes[3] = (uint8_t) (word >> 24);
-}
-
-// MD5
-__device__ void md5(uint8_t *password, size_t length, uint8_t *digest) {
-
-    // These vars will contain the hash
-    uint32_t h0, h1, h2, h3;
-    uint32_t w[16];
-    uint32_t a, b, c, d, i, f, g, temp;
-
-    // Append the "1" bit; most significant bit is "first"
-    password[length] = 0x80;
-
-    // Store password to register
-    for (i = 0; i < 14; i++) {
-        w[i] = bytes_to_word(password + i*4);
-    }
-
-    // Append the length in bits at the end of the buffer.
-    uint8_t length_bytes[4];
-    word_to_bytes(length<<3, length_bytes);
-    w[14] = bytes_to_word(length_bytes); // the lower 4 bytes
-    // length>>29 == length*8>>32, but avoids overflow.
-    word_to_bytes(length>>29, length_bytes);
-    w[15] = bytes_to_word(length_bytes); // the higher 4 bytes
-
-    // Initialize variables - simple count in nibbles:
-    h0 = device_h_init[0];
-    h1 = device_h_init[1];
-    h2 = device_h_init[2];
-    h3 = device_h_init[3];
-
-    // Initialize hash value for this chunk:
-    a = h0;
-    b = h1;
-    c = h2;
-    d = h3;
-
-    // Main loop:
-    for(i = 0; i<64; i++) {
-
-        if (i < 16) {
-            f = (b & c) | ((~b) & d);
-            g = i;
-        } else if (i < 32) {
-            f = (d & b) | ((~d) & c);
-            g = (5*i + 1) % 16;
-        } else if (i < 48) {
-            f = b ^ c ^ d;
-            g = (3*i + 5) % 16;
-        } else {
-            f = c ^ (b | (~d));
-            g = (7*i) % 16;
-        }
-
-        temp = d;
-        d = c;
-        c = b;
-        b = b + LEFTROTATE((a + f + device_k[i] + w[g]), device_r[i]);
-        a = temp;
-
-    }
-
-    // Add this chunk's hash to result so far:
-    h0 += a;
-    h1 += b;
-    h2 += c;
-    h3 += d;
-
-    //var char digest[16] := h0 append h1 append h2 append h3 //(Output is in little-endian)
-    word_to_bytes(h0, digest);
-    word_to_bytes(h1, digest + 4);
-    word_to_bytes(h2, digest + 8);
-    word_to_bytes(h3, digest + 12);
-}
-
-// Password generator
-__device__ void generate_password(size_t length, uint8_t *password, int id) {
-    uint32_t current_word = id;
-    for (int i = 0; i < length; i++) {
-        password[length - 1 - i] = (uint8_t)device_charset[current_word % NUM_CHAR];
-        current_word /= NUM_CHAR;
-    }
-    for (int i = length; i < 56; i++) {
-        password[i] = 0;
-    }
-}
-
-// Brute force
-__global__ void brute_force(uint8_t *test_digest, size_t length, uint32_t max_num, uint8_t* found_flag, uint8_t *password_found) {
-
-    uint8_t digest[16]; // This var will store the calculated MD5 hash
-    uint8_t mismatch = 0; // The result of comparison between target hash and calculated hash
-    uint8_t password[56]; // The password for calculation
-
-    int tid = blockDim.x * blockIdx.x + threadIdx.x;
-
-    for (int i = 0; tid + i < max_num; i = i + blockDim.x * gridDim.x) {
-
-        // Generate a password for MD5
-        generate_password(length, password, tid + i);
-
-        // Invoke MD5
-        md5(password, length, digest);
-
-        // Compare with the target hash
-        mismatch = 0;
-        for (int j = 0; j < 16; j++) {
-            if (digest[j] != test_digest[j]) {
-                mismatch = 1;
-            }
-        }
-
-        // If found the correct password, write to global memory
-        if (mismatch == 0) {
-            for (int j = 0; j < 56; j++) {
-                password_found[j] = password[j];
-            }
-            *found_flag = 1;
-        }
-
-        __syncthreads();
-
-        // Check if any thread has found the correct password
-        // The found_flag is in global memory
-        if (*found_flag == 1) {
-            return;
-        }
-    }
-}
-
-
-__global__ void get_md5(uint8_t *password, size_t length, uint8_t *digest) {
-    md5(password, length, digest);
-}
-
-__global__ void gen_pwd(int length, int max_num, uint8_t *password) {//, int *id, char *char_d) {
-    int tid = blockDim.x * blockIdx.x + threadIdx.x;
-    // uint8_t local_password[56];
-    for (int i = 0; i + tid < max_num; i = i + blockDim.x * gridDim.x) {
-        uint32_t password_index = (tid + i) * 56;
-        uint32_t id_index = tid + i;
-        generate_password(length, password + password_index, id_index);
-    }
-}
-
 int main(int argc, char **argv) {
 
     // Check input parameters
@@ -222,37 +95,54 @@ int main(int argc, char **argv) {
         exit(0);
     }
 
-    printf("Convert hash to uint8. Hash: ");
-    hash_to_int(test, int_test);  // Convert target hash to uint8_t
-    for (int i = 0; i < 32; i++) {
-        printf("%c", test[i]);
+    // Convert target hash to uint8_t
+    hash_to_int(test, int_test);
+
+    // Open dictionary file
+    const char *filename = "plaintext/sorted_dict";
+    FILE *infile;
+    if ((infile = fopen (filename, "r")) == NULL){
+        printf ("%s can't be opened\n", filename);
+        exit(0);
     }
-    printf("\n");
+    
+    Timer totaltimer, filereadtimer, gpu_total_timer, md5_timer, dict_timer, brute_timer;
+    startTime(&totaltimer);
 
-    printf("Declare variables\n");
-    uint8_t *host_found_flag;
-    uint8_t *host_password_found;
+    // Read file
+    startTime(&filereadtimer);
+    unsigned int numPwd;
+    password *pwd;
+    readPwdFromFile(infile, &pwd, &numPwd);
+    printf("Total Dictionary Words: %d\n",numPwd);
+    stopTime(&filereadtimer);
+    printf("File read time: %f s\n", elapsedTime(filereadtimer));
 
-    uint8_t *device_found_flag;
+    startTime(&gpu_total_timer);
+    // Declare variables
+    bool *host_found_flag;
+    password *host_password_found;
+
+    bool *device_found_flag;
     uint8_t *device_test_digest;
-    uint8_t *device_password_found;
+    password *device_password_found;
+    password *device_pwd_dict;
 
-    printf("Allocate host memory\n");
-    host_found_flag = (uint8_t *)malloc(sizeof(uint8_t));
-    host_password_found = (uint8_t *)malloc(56 * sizeof(uint8_t));
+    // Allocate host memory
+    host_found_flag = (bool *)malloc(sizeof(bool));
+    host_password_found = (password *)malloc(sizeof(password));
 
-    printf("Allocate device global memory\n");
+    // Allocate device global memory
     cudaMalloc((void **)&device_test_digest, 16 * sizeof(uint8_t));
-    cudaMalloc((void **)&device_found_flag, sizeof(uint8_t));
-    cudaMalloc((void **)&device_password_found, 56 * sizeof(uint8_t));
+    cudaMalloc((void **)&device_found_flag, sizeof(bool));
+    cudaMalloc((void **)&device_password_found, sizeof(password));
+    cudaMalloc((void **)&device_pwd_dict, numPwd * sizeof(password));
 
-
-    printf("Copy from host to device memory\n");
-    *host_found_flag = 0;
-    cudaMemcpy(device_found_flag, host_found_flag, sizeof(uint8_t), cudaMemcpyHostToDevice);
+    // Copy from host to device memory
     cudaMemcpy(device_test_digest, int_test, 16 * sizeof(uint8_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_pwd_dict, pwd, numPwd * sizeof(password), cudaMemcpyHostToDevice);
 
-    printf("Prepare constants in device constant memory\n");
+    // Prepare constants in device constant memory
 
     uint32_t host_k[64] = {
         0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee ,
@@ -280,57 +170,93 @@ int main(int argc, char **argv) {
 
     uint32_t host_h_init[4] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476};
 
-    const char* host_charset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const char* host_charset = "abcdefghijklmnopqrstuvwxyz";
 
     cudaMemcpyToSymbol(device_k, host_k, 64 * sizeof(uint32_t));
     cudaMemcpyToSymbol(device_r, host_r, 64 * sizeof(uint32_t));
     cudaMemcpyToSymbol(device_h_init, host_h_init, 4 * sizeof(uint32_t));
     cudaMemcpyToSymbol(device_charset, host_charset, 62 * sizeof(char));
 
+    startTime(&md5_timer);
 
-    printf("Scan from length = 1 to %d\n", MAX_LEN);
-    printf("\n");
-    printf("\n");
-    int max_num = 1;
-    for (int i = 0; i < MAX_LEN; i++) {
-        max_num *= NUM_CHAR;
-        size_t password_length = i + 1;
-        printf("Password length: %d\n", i+1);
-        printf("Number of combinations: %d\n", max_num);
+    // Reset found flag
+    cudaMemset(device_found_flag, false, sizeof(bool));
 
-        // Grid dimensions and block dimensions
-        dim3 block_dim(256, 1, 1);
-        dim3 grid_dim(256, 1, 1);
-        
-        // Invoke brute_force
-        printf("Brute force start\n");
-        brute_force<<<grid_dim, block_dim>>>(device_test_digest, password_length, max_num, device_found_flag, device_password_found);
-        cudaDeviceSynchronize();
-
-        // Read result
-        cudaMemcpy(host_found_flag, device_found_flag, sizeof(uint8_t), cudaMemcpyDeviceToHost);
-        printf("Found flag: %d\n", *host_found_flag);
-        printf("Brute force end\n");
-        if (*host_found_flag == 1) {
-            cudaMemcpy(host_password_found, device_password_found, 56 * sizeof(uint8_t), cudaMemcpyDeviceToHost);
-            printf("The password is: ");
-            for (int j = 0; j < i + 1; j++) {
-                printf("%c", host_password_found[j]);
-            }
-            printf("\n");
-            printf("\n");
-            printf("\n");
-            break;
-        }
-
-        printf("\n");
-        printf("\n");
-
-        // Scan through all given length
-        if (i == MAX_LEN-1) {
-            printf("The password is not found.\n");
-        }
+    // Dictionary attack
+    startTime(&dict_timer);
+    
+    int blocks_needed = ceil(numPwd/BLOCK_SIZE);
+    int grid_size = 0;
+    if (blocks_needed > MAX_GRID_SIZE) {
+        grid_size = MAX_GRID_SIZE;
     }
+    else {
+        grid_size = blocks_needed;
+    }
+    dim3 block_dim(BLOCK_SIZE, 1, 1);
+    dim3 grid_dim(grid_size, 1, 1);
+
+    printf("Dictionary attack start\n")
+    dict_attack<<<grid_dim, block_dim>>>(device_test_digest, device_pwd_dict, numPwd, device_password_found, device_found_flag);
+    cudaDeviceSynchronize();
+    cudaMemcpy(host_found_flag, device_found_flag, sizeof(bool), cudaMemcpyDeviceToHost);
+    stopTime(&dict_timer);
+    printf("Dictionary Time: %f s\n", elapsedTime(dict_timer));
+
+    if (*host_found_flag == true) {
+        cudaMemcpy(host_password_found, device_password_found, sizeof(password), cudaMemcpyDeviceToHost);
+        printf("The password is: ");
+        for (int j = 0; j < i + 1; j++) {
+            printf("%c", host_password_found->word[j]);
+        }
+        printf("\n");
+        break;
+    }
+    else {
+        printf("The password is not found in dictionary");
+
+        // Brute force
+        startTime(&brute_timer);
+        int max_num = 1;
+        for (int i = 0; i < BRUTE_FORCE_MAX_LEN; i++) {
+            max_num *= NUM_CHAR;
+            size_t password_length = i + 1;
+            printf("Password length: %d\n", i+1);
+            printf("Number of combinations: %d\n", max_num);
+
+            // Grid dimensions and block dimensions
+            dim3 block_dim(256, 1, 1);
+            dim3 grid_dim(256, 1, 1);
+            
+            // Invoke brute_force
+            printf("Brute force start\n");
+            brute_force<<<grid_dim, block_dim>>>(device_test_digest, password_length, max_num, device_found_flag, device_password_found);
+            cudaDeviceSynchronize();
+
+            // Read result
+            cudaMemcpy(host_found_flag, device_found_flag, sizeof(bool), cudaMemcpyDeviceToHost);
+            printf("Brute force end\n");
+            if (*host_found_flag == true) {
+                cudaMemcpy(host_password_found, device_password_found, sizeof(password), cudaMemcpyDeviceToHost);
+                printf("The password is: ");
+                for (int j = 0; j < i + 1; j++) {
+                    printf("%c", host_password_found->word[j]);
+                }
+                printf("\n");
+                break;
+            }
+
+            // Scan through all given length
+            if (i == BRUTE_FORCE_MAX_LEN-1) {
+                printf("The password is not found in brute force.\n");
+            }
+        }
+        stopTime(&brute_timer);
+        printf("Brute force Time: %f s\n", elapsedTime(brute_timer));
+    }
+
+    stopTime(&md5_timer);
+    printf("MD5 Time: %f s\n", elapsedTime(md5_timer));
 
     printf("Free host and device memory\n");
     cudaFree(device_test_digest);
@@ -338,6 +264,14 @@ int main(int argc, char **argv) {
     cudaFree(device_found_flag);
     free(host_found_flag);
     free(host_password_found);
+
+    stopTime(&gpu_total_timer);
+    printf("GPU Time: %f s\n", elapsedTime(gpu_total_timer));
+
+    stopTime(&totaltimer);
+    printf("Total Time: %f s\n", elapsedTime(totaltimer));
+
+    if(infile != NULL) fclose (infile);
 
     return 0;
 }
