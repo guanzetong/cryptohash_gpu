@@ -1,0 +1,32 @@
+Total Dictionary Words: 751662
+File read time: 0.124303 s
+Dictionary Time: 0.026031 s
+The password is not found in dictionary.
+
+Start brute force.
+
+Brute force try password length: 1
+Number of combinations: 26
+
+Brute force try password length: 2
+Number of combinations: 676
+
+Brute force try password length: 3
+Number of combinations: 17576
+
+Brute force try password length: 4
+Number of combinations: 456976
+
+Brute force try password length: 5
+Number of combinations: 11881376
+
+The password is found: ztgua
+
+Brute force Time: 0.003533 s
+MD5 Time: 0.029601 s
+GPU Time: 0.284619 s
+Total Time: 0.408936 s
+
+real	0m0.497s
+user	0m0.161s
+sys	0m0.208s

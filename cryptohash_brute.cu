@@ -5,7 +5,7 @@
 #include "cracker_kernel.cu"
 
 #define BLOCK_SIZE 128
-#define BRUTE_FORCE_MAX_LEN 5
+#define BRUTE_FORCE_MAX_LEN 1
 #define MAX_GRID_SIZE 2147483647
 
 // CPU var
@@ -149,19 +149,23 @@ int main(int argc, char **argv) {
     // Declare variables
     bool *host_found_flag;
     password *host_password_found;
+    password *host_pwd_gen;
 
     bool *device_found_flag;
     password *device_password_found;
     password *device_pwd_dict;
+    password *device_pwd_gen;
 
     // Allocate host memory
     host_found_flag = (bool *)malloc(sizeof(bool));
     host_password_found = (password *)malloc(sizeof(password));
+    host_pwd_gen = (password *)malloc(26 * sizeof(password));
 
     // Allocate device global memory
     cudaMalloc((void **)&device_found_flag, sizeof(bool));
     cudaMalloc((void **)&device_password_found, sizeof(password));
     cudaMalloc((void **)&device_pwd_dict, numPwd * sizeof(password));
+    cudaMalloc((void **)&device_pwd_gen, 26 * sizeof(password));
 
     // Copy from host to device memory
     cudaMemcpy(device_pwd_dict, pwd, numPwd * sizeof(password), cudaMemcpyHostToDevice);
@@ -211,33 +215,33 @@ int main(int argc, char **argv) {
     // Dictionary attack
     startTime(&dict_timer);
     
-    int blocks_needed = ceil(numPwd/BLOCK_SIZE);
-    int grid_size = 0;
-    if (blocks_needed > MAX_GRID_SIZE) {
-        grid_size = MAX_GRID_SIZE;
-    }
-    else {
-        grid_size = blocks_needed;
-    }
-    dim3 block_dim(BLOCK_SIZE, 1, 1);
-    dim3 grid_dim(grid_size, 1, 1);
+    // int blocks_needed = ceil(numPwd/BLOCK_SIZE);
+    // int grid_size = 0;
+    // if (blocks_needed > MAX_GRID_SIZE) {
+    //     grid_size = MAX_GRID_SIZE;
+    // }
+    // else {
+    //     grid_size = blocks_needed;
+    // }
+    // dim3 block_dim(BLOCK_SIZE, 1, 1);
+    // dim3 grid_dim(grid_size, 1, 1);
 
-    dict_attack<<<grid_dim, block_dim>>>(device_pwd_dict, numPwd, device_password_found, device_found_flag);
-    cudaDeviceSynchronize();
-    cudaMemcpy(host_found_flag, device_found_flag, sizeof(bool), cudaMemcpyDeviceToHost);
+    // dict_attack<<<grid_dim, block_dim>>>(device_pwd_dict, numPwd, device_password_found, device_found_flag);
+    // cudaDeviceSynchronize();
+    // cudaMemcpy(host_found_flag, device_found_flag, sizeof(bool), cudaMemcpyDeviceToHost);
     stopTime(&dict_timer);
     printf("Dictionary Time: %f s\n", elapsedTime(dict_timer));
 
-    if (*host_found_flag == true) {
-        cudaMemcpy(host_password_found, device_password_found, sizeof(password), cudaMemcpyDeviceToHost);
-        printf("The password is: ");
-        int pwd_len = (int) host_password_found[0].length;
-        for (int j = 0; j < pwd_len; j++) {
-            printf("%c", host_password_found[0].word[j]);
-        }
-        printf("\n\n");
-    }
-    else {
+    // if (*host_found_flag == true) {
+    //     cudaMemcpy(host_password_found, device_password_found, sizeof(password), cudaMemcpyDeviceToHost);
+    //     printf("The password is: ");
+    //     int pwd_len = (int) host_password_found[0].length;
+    //     for (int j = 0; j < pwd_len; j++) {
+    //         printf("%c", host_password_found[0].word[j]);
+    //     }
+    //     printf("\n\n");
+    // }
+    // else {
         printf("The password is not found in dictionary.\n\n");
 
         printf("Start brute force.\n\n");
@@ -263,7 +267,7 @@ int main(int argc, char **argv) {
             dim3 grid_dim(grid_size, 1, 1);
             
             // Invoke brute_force
-            brute_force<<<grid_dim, block_dim>>>(password_length, max_num, device_found_flag, device_password_found);
+            brute_force<<<grid_dim, block_dim>>>(password_length, max_num, device_found_flag, device_password_found, device_pwd_gen);
             cudaDeviceSynchronize();
 
             // Read result
@@ -285,6 +289,11 @@ int main(int argc, char **argv) {
         }
         stopTime(&brute_timer);
         printf("Brute force Time: %f s\n", elapsedTime(brute_timer));
+    // }
+
+    cudaMemcpy(host_pwd_gen, device_pwd_gen, 26 * sizeof(password), cudaMemcpyDeviceToHost);
+    for (int i = 0; i < 26; i++) {
+        printf("%d\n", host_pwd_gen[i].word[0]);
     }
 
     stopTime(&md5_timer);
@@ -303,6 +312,9 @@ int main(int argc, char **argv) {
     printf("Total Time: %f s\n", elapsedTime(totaltimer));
 
     if(infile != NULL) fclose (infile);
+
+    cudaFree(device_pwd_gen);
+    free(host_pwd_gen);
 
     return 0;
 }

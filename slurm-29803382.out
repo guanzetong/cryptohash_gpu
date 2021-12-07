@@ -1,6 +1,6 @@
 Total Dictionary Words: 751662
-File read time: 0.125642 s
-Dictionary Time: 0.087482 s
+File read time: 0.122305 s
+Dictionary Time: 0.000001 s
 The password is not found in dictionary.
 
 Start brute force.
@@ -17,13 +17,16 @@ Number of combinations: 17576
 Brute force try password length: 4
 Number of combinations: 456976
 
-The password is found: bkso
+Brute force try password length: 5
+Number of combinations: 11881376
 
-Brute force Time: 0.000156 s
-MD5 Time: 0.087682 s
-GPU Time: 0.287714 s
-Total Time: 0.413372 s
+The password is found: zzzzz
 
-real	0m0.471s
-user	0m0.162s
-sys	0m0.269s
+Brute force Time: 0.000518 s
+MD5 Time: 0.000557 s
+GPU Time: 0.171034 s
+Total Time: 0.293354 s
+
+real	0m0.347s
+user	0m0.133s
+sys	0m0.193s

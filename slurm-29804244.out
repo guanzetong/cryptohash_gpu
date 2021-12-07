@@ -1,0 +1,46 @@
+Total Dictionary Words: 751662
+File read time: 0.231872 s
+Dictionary Time: 0.000000 s
+The password is not found in dictionary.
+
+Start brute force.
+
+Brute force try password length: 1
+Number of combinations: 26
+
+The password is not found in brute force.
+
+Brute force Time: 0.000049 s
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+MD5 Time: 0.009645 s
+GPU Time: 7.605157 s
+Total Time: 7.837043 s
+
+real	0m8.019s
+user	0m0.281s
+sys	0m0.214s
