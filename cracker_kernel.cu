@@ -2,8 +2,10 @@
 
 #define NUM_CHAR 26
 
-// Compare calculated digest with test digest
+__constant__ password device_seq[20];
+__constant__ char device_charset[26];
 
+// Compare calculated digest with test digest
 __device__ inline int compare_digest(uint8_t *calc_digest, uint8_t *test_digest) {
     int mismatch = 0;
     for (int j = 0; j < 16; j++) {
@@ -15,7 +17,7 @@ __device__ inline int compare_digest(uint8_t *calc_digest, uint8_t *test_digest)
 }
 
 // Mutate dictionary content
-__device__ mutate_dict(int z, password *original, password *mutated) {
+__device__ void mutate_dict(int z, password *original, password *mutated) {
     memcpy(mutated, original, sizeof(password));
     if(z == -1){
     } else if (z==0){
@@ -55,14 +57,14 @@ __device__ mutate_dict(int z, password *original, password *mutated) {
         // iterator: z-232
         //sprintf(&temp,"%s",sequences[z-252]);
         size_t len = (*mutated).length;
-        memcpy(&((*mutated).word[len]),seq_d[z-232].word,seq_d[z-232].length);
-        (*mutated).length = len + seq_d[z-232].length;
+        memcpy(&((*mutated).word[len]),device_seq[z-232].word,device_seq[z-232].length);
+        (*mutated).length = len + device_seq[z-232].length;
     }
 }
 
 // Dictionary attack
 
-__global__ dict_attack(uint8_t *test_digest, password *pwd_dict, uint32_t max_num, password *password_found, volatile bool *found_flag) {
+__global__ void dict_attack(uint8_t *test_digest, password *pwd_dict, uint32_t max_num, password *password_found, volatile bool *found_flag) {
     uint8_t digest[16]; // This var will store the calculated MD5 hash
     uint8_t mismatch = 0; // The result of comparison between target hash and calculated hash
     password mutated_pwd;
@@ -87,7 +89,7 @@ __global__ dict_attack(uint8_t *test_digest, password *pwd_dict, uint32_t max_nu
             }
 
             // Mutate dictionary contents
-            mutate_dict(z, &(pwd_dict[tid]), &mutated_pwd);
+            mutate_dict(z, &(pwd_dict[tid + i]), &mutated_pwd);
 
             // Invoke MD5
             md5(&mutated_pwd, digest);
@@ -97,7 +99,7 @@ __global__ dict_attack(uint8_t *test_digest, password *pwd_dict, uint32_t max_nu
 
             // If found the correct password, write to global memory
             if (mismatch == 0) {
-                memcpy(pwd_found, &pwd, sizeof(password));
+                memcpy(password_found, &mutated_pwd, sizeof(password));
                 shared_found_flag = true;
                 *found_flag = true;
             }
@@ -111,7 +113,7 @@ __global__ dict_attack(uint8_t *test_digest, password *pwd_dict, uint32_t max_nu
 }
 
 // Brute force
-__global__ void brute_force(uint8_t *test_digest, size_t try_length, uint32_t max_num, volatile bool* found_flag, password *pwd_found) {
+__global__ void brute_force(uint8_t *test_digest, size_t try_length, uint32_t max_num, volatile bool *found_flag, password *pwd_found) {
 
     uint8_t digest[16]; // This var will store the calculated MD5 hash
     int mismatch = 0; // The result of comparison between target hash and calculated hash
@@ -138,8 +140,9 @@ __global__ void brute_force(uint8_t *test_digest, size_t try_length, uint32_t ma
         // Generate a password
         memset(&pwd, 0, sizeof(password));
         pwd.length = try_length;
+        int current_word = tid + i;
         for (int j = 0; j < try_length; j++) {
-            pwd_word[try_length - 1 - i] = (uint8_t)device_charset[current_word % NUM_CHAR];
+            pwd.word[try_length - 1 - j] = device_charset[current_word % NUM_CHAR];
             current_word /= NUM_CHAR;
         }
 

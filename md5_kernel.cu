@@ -11,7 +11,6 @@ typedef struct password_t{
 __constant__ uint32_t device_k[64];
 __constant__ uint32_t device_r[64];
 __constant__ uint32_t device_h_init[4];
-__constant__ char device_charset[62];
 
 // Convert 4 bytes(uint8_t) to 1 word(uint32_t)
 __device__ uint32_t bytes_to_word(uint8_t *bytes)
@@ -44,19 +43,19 @@ __device__ void md5(password *pwd, uint8_t *digest) {
     uint8_t *msg = (uint8_t *)pwd->word;
 
     // Append the "1" bit; most significant bit is "first"
-    msg[length] = 0x80;
+    msg[init_len] = 0x80;
 
     // Store password to register
     for (i = 0; i < 14; i++) {
-        w[i] = bytes_to_word(password + i*4);
+        w[i] = bytes_to_word(msg + i*4);
     }
 
     // Append the length in bits at the end of the buffer.
     uint8_t length_bytes[4];
-    word_to_bytes(length<<3, length_bytes);
+    word_to_bytes(init_len<<3, length_bytes);
     w[14] = bytes_to_word(length_bytes); // the lower 4 bytes
     // length>>29 == length*8>>32, but avoids overflow.
-    word_to_bytes(length>>29, length_bytes);
+    word_to_bytes(init_len>>29, length_bytes);
     w[15] = bytes_to_word(length_bytes); // the higher 4 bytes
 
     // Initialize variables - simple count in nibbles:

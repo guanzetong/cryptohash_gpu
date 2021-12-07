@@ -1,17 +1,43 @@
 // Cryptohash
 
 #include <wb.h>
-#include "support.h"
+#include "support.cu"
 #include "cracker_kernel.cu"
 
 #define BLOCK_SIZE 128
-#define DICT_PWD_NUM_PER_THREAD 10
+#define PWD_NUM_PER_THREAD 10
 #define BRUTE_FORCE_MAX_LEN 5
 #define MAX_GRID_SIZE 65536
 
 // CPU var
 char *test;
 uint8_t int_test[16];
+password seq[20];
+
+// Initialize common seqences for dictionary mutations
+void init_seq(){
+    //seq = (password *)malloc(20*sizeof(password));
+    memcpy(seq[0].word,"123", 3); seq[0].length = 3;
+    memcpy(seq[1].word,"1234", 4); seq[1].length = 4;
+    memcpy(seq[2].word,"12345", 5);   seq[2].length = 5;
+    memcpy(seq[3].word,"123456", 6);   seq[3].length = 6;
+    memcpy(seq[4].word,"1234567", 7);   seq[4].length = 7;
+    memcpy(seq[5].word,"12345678", 8);   seq[5].length = 8;
+    memcpy(seq[6].word,"123456789", 9);   seq[6].length = 9;
+    memcpy(seq[7].word,"1234567890", 10);   seq[7].length = 10;
+    memcpy(seq[8].word,"696969", 6);   seq[8].length = 6;
+    memcpy(seq[9].word,"111111", 6);   seq[9].length = 6;
+    memcpy(seq[10].word,"1111", 4);   seq[10].length = 4;
+    memcpy(seq[11].word,"1212", 4);   seq[11].length = 4;
+    memcpy(seq[12].word,"7777", 4);   seq[12].length = 4;
+    memcpy(seq[13].word,"1004", 4);   seq[13].length = 4;
+    memcpy(seq[14].word,"2000", 4);   seq[14].length = 4;
+    memcpy(seq[15].word,"4444", 4);   seq[15].length = 4;
+    memcpy(seq[16].word,"2222", 4);   seq[16].length = 4;
+    memcpy(seq[17].word,"6969", 4);   seq[17].length = 4;
+    memcpy(seq[18].word,"9999", 4);   seq[18].length = 4;
+    memcpy(seq[19].word, "3333", 4);   seq[19].length = 4;
+}
 
 // Read dictionary
 void readPwdFromFile(FILE *infile, password **pwd, unsigned int *numLines){
@@ -53,9 +79,9 @@ void readPwdFromFile(FILE *infile, password **pwd, unsigned int *numLines){
                 (*pwd)[i-toReduce].length = read_len;
                 //printf("Pwd Read: %s, %d\n", (*pwd)[i], read_len);
               }
-          } else {
+        } else {
             ++toReduce;
-          }
+        }
         free(line);
         line = NULL;
         len = 0;
@@ -105,7 +131,9 @@ int main(int argc, char **argv) {
         printf ("%s can't be opened\n", filename);
         exit(0);
     }
-    
+
+    init_seq();
+
     Timer totaltimer, filereadtimer, gpu_total_timer, md5_timer, dict_timer, brute_timer;
     startTime(&totaltimer);
 
@@ -175,7 +203,8 @@ int main(int argc, char **argv) {
     cudaMemcpyToSymbol(device_k, host_k, 64 * sizeof(uint32_t));
     cudaMemcpyToSymbol(device_r, host_r, 64 * sizeof(uint32_t));
     cudaMemcpyToSymbol(device_h_init, host_h_init, 4 * sizeof(uint32_t));
-    cudaMemcpyToSymbol(device_charset, host_charset, 62 * sizeof(char));
+    cudaMemcpyToSymbol(device_charset, host_charset, 26 * sizeof(char));
+    cudaMemcpyToSymbol(device_seq, seq, 20 * sizeof(password));
 
     startTime(&md5_timer);
 
@@ -185,7 +214,7 @@ int main(int argc, char **argv) {
     // Dictionary attack
     startTime(&dict_timer);
     
-    int blocks_needed = ceil(numPwd/BLOCK_SIZE);
+    int blocks_needed = ceil(numPwd/(BLOCK_SIZE*PWD_NUM_PER_THREAD));
     int grid_size = 0;
     if (blocks_needed > MAX_GRID_SIZE) {
         grid_size = MAX_GRID_SIZE;
@@ -196,7 +225,6 @@ int main(int argc, char **argv) {
     dim3 block_dim(BLOCK_SIZE, 1, 1);
     dim3 grid_dim(grid_size, 1, 1);
 
-    printf("Dictionary attack start\n")
     dict_attack<<<grid_dim, block_dim>>>(device_test_digest, device_pwd_dict, numPwd, device_password_found, device_found_flag);
     cudaDeviceSynchronize();
     cudaMemcpy(host_found_flag, device_found_flag, sizeof(bool), cudaMemcpyDeviceToHost);
@@ -206,49 +234,56 @@ int main(int argc, char **argv) {
     if (*host_found_flag == true) {
         cudaMemcpy(host_password_found, device_password_found, sizeof(password), cudaMemcpyDeviceToHost);
         printf("The password is: ");
-        for (int j = 0; j < i + 1; j++) {
-            printf("%c", host_password_found->word[j]);
+        int pwd_len = (int) host_password_found[0].length;
+        for (int j = 0; j < pwd_len; j++) {
+            printf("%c", host_password_found[0].word[j]);
         }
-        printf("\n");
-        break;
+        printf("\n\n");
     }
     else {
-        printf("The password is not found in dictionary");
+        printf("The password is not found in dictionary.\n\n");
 
+        printf("Start brute force.\n\n");
         // Brute force
         startTime(&brute_timer);
         int max_num = 1;
         for (int i = 0; i < BRUTE_FORCE_MAX_LEN; i++) {
             max_num *= NUM_CHAR;
             size_t password_length = i + 1;
-            printf("Password length: %d\n", i+1);
-            printf("Number of combinations: %d\n", max_num);
+            printf("Brute force try password length: %d\n", i+1);
+            printf("Number of combinations: %d\n\n", max_num);
 
             // Grid dimensions and block dimensions
-            dim3 block_dim(256, 1, 1);
-            dim3 grid_dim(256, 1, 1);
+            int blocks_needed = ceil(max_num/(BLOCK_SIZE*PWD_NUM_PER_THREAD));
+            int grid_size = 0;
+            if (blocks_needed > MAX_GRID_SIZE) {
+                grid_size = MAX_GRID_SIZE;
+            }
+            else {
+                grid_size = blocks_needed;
+            }
+            dim3 block_dim(BLOCK_SIZE, 1, 1);
+            dim3 grid_dim(grid_size, 1, 1);
             
             // Invoke brute_force
-            printf("Brute force start\n");
             brute_force<<<grid_dim, block_dim>>>(device_test_digest, password_length, max_num, device_found_flag, device_password_found);
             cudaDeviceSynchronize();
 
             // Read result
             cudaMemcpy(host_found_flag, device_found_flag, sizeof(bool), cudaMemcpyDeviceToHost);
-            printf("Brute force end\n");
             if (*host_found_flag == true) {
                 cudaMemcpy(host_password_found, device_password_found, sizeof(password), cudaMemcpyDeviceToHost);
-                printf("The password is: ");
+                printf("The password is found: ");
                 for (int j = 0; j < i + 1; j++) {
-                    printf("%c", host_password_found->word[j]);
+                    printf("%c", host_password_found[0].word[j]);
                 }
-                printf("\n");
+                printf("\n\n");
                 break;
             }
 
             // Scan through all given length
             if (i == BRUTE_FORCE_MAX_LEN-1) {
-                printf("The password is not found in brute force.\n");
+                printf("The password is not found in brute force.\n\n");
             }
         }
         stopTime(&brute_timer);
@@ -258,7 +293,7 @@ int main(int argc, char **argv) {
     stopTime(&md5_timer);
     printf("MD5 Time: %f s\n", elapsedTime(md5_timer));
 
-    printf("Free host and device memory\n");
+    // Free host and device memory
     cudaFree(device_test_digest);
     cudaFree(device_found_flag);
     cudaFree(device_found_flag);
