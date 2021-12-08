@@ -1,11 +1,3 @@
-/******************************************************************************
- *cr
- *cr         (C) Copyright 2010-2013 The Board of Trustees of the
- *cr                        University of Illinois
- *cr                         All Rights Reserved
- *cr
- ******************************************************************************/
-
 #include "support.h"
 
 void startTime(Timer* timer) {

@@ -34,7 +34,7 @@ __device__ void word_to_bytes(uint32_t word, uint8_t *bytes)
 // MD5
 __device__ void md5(password *pwd, uint8_t *digest) {
 
-    // These vars will contain the hash
+    // Declare variables
     uint32_t h0, h1, h2, h3;
     uint32_t w[16];
     uint32_t a, b, c, d, i, f, g, temp;
@@ -42,7 +42,7 @@ __device__ void md5(password *pwd, uint8_t *digest) {
     size_t init_len = pwd->length;
     uint8_t *msg = (uint8_t *)pwd->word;
 
-    // Append the "1" bit; most significant bit is "first"
+    // Append the "1" bit to the end of original message
     msg[init_len] = 0x80;
 
     // Store password to register
@@ -50,27 +50,26 @@ __device__ void md5(password *pwd, uint8_t *digest) {
         w[i] = bytes_to_word(msg + i*4);
     }
 
-    // Append the length in bits at the end of the buffer.
+    // Append the length in bits at the end.
     uint8_t length_bytes[4];
     word_to_bytes(init_len<<3, length_bytes);
     w[14] = bytes_to_word(length_bytes); // the lower 4 bytes
-    // length>>29 == length*8>>32, but avoids overflow.
     word_to_bytes(init_len>>29, length_bytes);
     w[15] = bytes_to_word(length_bytes); // the higher 4 bytes
 
-    // Initialize variables - simple count in nibbles:
+    // Initialize variables
     h0 = device_h_init[0];
     h1 = device_h_init[1];
     h2 = device_h_init[2];
     h3 = device_h_init[3];
 
-    // Initialize hash value for this chunk:
+    // Initialize hash value
     a = h0;
     b = h1;
     c = h2;
     d = h3;
 
-    // Main loop:
+    // Loop 64 times
     for(i = 0; i<64; i++) {
 
         if (i < 16) {
@@ -95,13 +94,12 @@ __device__ void md5(password *pwd, uint8_t *digest) {
 
     }
 
-    // Add this chunk's hash to result so far:
     h0 += a;
     h1 += b;
     h2 += c;
     h3 += d;
 
-    //var char digest[16] := h0 append h1 append h2 append h3 //(Output is in little-endian)
+    // Output digest
     word_to_bytes(h0, digest);
     word_to_bytes(h1, digest + 4);
     word_to_bytes(h2, digest + 8);

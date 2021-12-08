@@ -15,7 +15,6 @@ password seq[20];
 
 // Initialize common seqences for dictionary mutations
 void init_seq(){
-    //seq = (password *)malloc(20*sizeof(password));
     memcpy(seq[0].word,"123", 3); seq[0].length = 3;
     memcpy(seq[1].word,"1234", 4); seq[1].length = 4;
     memcpy(seq[2].word,"12345", 5);   seq[2].length = 5;
